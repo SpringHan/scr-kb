@@ -54,10 +54,11 @@ Just one upper case letter will be inserted when its value is t."
   :group 'scr-kb)
 
 (defvar scr-kb-keymap-regular
-  '((?1 ?2 ?3 ?4 ?5 ?6 ?7 ?8 ?9 ?0 -1 -1)
-    (?q ?w ?e ?r ?t ?y ?u ?i ?o ?p -1 -3)
-    (?a ?s ?d ?f ?g ?h ?j ?k ?l -1 -4)
-    (-5 ?z ?x ?c ?v ?b ?n ?m -2))
+  '((?1 ?2 ?3 ?4 ?5 ?6 ?7 ?8 ?9 ?0)
+    (?q ?w ?e ?r ?t ?y ?u ?i ?o ?p)
+    (?a ?s ?d ?f ?g ?h ?j ?k ?l)
+    (shift ?z ?x ?c ?v ?b ?n ?m backspace)
+    (fn space return))
   "On-screen keyboard keymap.")
 
 (defvar scr-kb-button-map
@@ -69,35 +70,40 @@ Just one upper case letter will be inserted when its value is t."
     map)
   "The button map of the on-screen keyboard keys.")
 
-(defmacro scr-kb-insert-button (key)
+(defmacro scr-kb-insert-button (key &optional display)
   "Insert button."
   (declare (indent 1))
-  `(insert-button ,key
+  `(insert-button ,(if display
+                       display
+                     key)
                   'type 'scr-kb-base
                   'action (lambda (_button)
-                            (scr-kb-other-buffer-insert ,key))))
+                            (scr-kb-other-buffer-do ,key))))
 
 (define-button-type 'scr-kb-base
-  'help-echo "mouse-1, RET: Push this button"
   'keymap scr-kb-button-map
   'face 'tool-bar
   'mouse-face 'tool-bar)
 
 (define-button-type 'scr-kb-key
   :supertype 'scr-kb-base
-  'action (lambda (_button) (scr-kb-other-buffer-do (lambda () (insert key)))))
+  'action (lambda (_button) (scr-kb-origin-frame-do (lambda () (insert key)))))
 
-(define-button-type 'scr-kb-backspace
-  :supertype 'scr-kb-base
-  'action (lambda (_button) (scr-kb-other-buffer-do (lambda () (backward-delete-char-untabify 1)))))
+;; (define-button-type 'scr-kb-backspace
+;;   :supertype 'scr-kb-base
+;;   'action (lambda (_button) (scr-kb-origin-frame-do (lambda () (backward-delete-char-untabify 1)))))
 
-(define-button-type 'scr-kb-return
-  :supertype 'scr-kb-base
-  'action (lambda (_button) (scr-kb-other-buffer-do #'newline)))
+;; (define-button-type 'scr-kb-return
+;;   :supertype 'scr-kb-base
+;;   'action (lambda (_button) (scr-kb-origin-frame-do #'newline)))
 
-(define-button-type 'scr-kb-space
+;; (define-button-type 'scr-kb-space
+;;   :supertype 'scr-kb-base
+;;   'action (lambda (_button) (scr-kb-origin-frame-do (lambda () (insert ?\s)))))
+
+(define-button-type 'scr-kb-fn
   :supertype 'scr-kb-base
-  'action (lambda (_button) (scr-kb-other-buffer-do (lambda () (insert ?\s)))))
+  'action (lambda (_button) (scr-kb-origin-frame-do (lambda () (insert ?\s)))))
 
 (define-button-type 'scr-kb--shift
   :supertype 'scr-kb-base
@@ -110,34 +116,47 @@ Just one upper case letter will be inserted when its value is t."
                        ('lock 'nil)
                        ('nil t))))
 
-(defun scr-kb-other-buffer-do (func)
-  "Switch to the last window, call FUNC, go back."
-  (with-selected-frame scr-kb-main-frame
-    (funcall func)))
+;; (defun scr-kb-origin-frame-do (func)
+;;   "Operating in the original frame."
+;;   (with-selected-frame scr-kb-main-frame
+;;     (funcall func)))
 
-(defun scr-kb-other-buffer-insert (key)
+(defun scr-kb-other-buffer-do (key)
   "Switch to the last window and insert KEY."
   (with-selected-frame scr-kb-main-frame
-    (when scr-kb-shift
-      (setq key (upcase key))
+    (when (numberp key)
+      (when scr-kb-shift
+        (setq key (upcase key))
 
-      (when (eq scr-kb-shift t)
-        (setq scr-kb-shift nil)))
-    (insert key)))
+        (when (eq scr-kb-shift t)
+          (setq scr-kb-shift nil))))
+
+    (let ((func (key-binding (read-kbd-macro (if (numberp key)
+                                                 (char-to-string key)
+                                               key)))))
+      (if (eq func 'self-insert-command)
+          (insert (pcase key
+                    ("SPC" " ")
+                    ("RET" "\n")
+                    (_ key)))
+        (call-interactively func)))))
 
 (defun scr-kb-insert-key-button (key)
-  "Insert KEY into current buffer, with corresponding action.
-If KEY is -1 (literal byte value), insert a space.
-If KEY is -2, insert a backspace button.
-If KEY is -3, insert a return button.
-If KEY is -4, insert a space button.
-Otherwise, insert the button corresponding to KEY."
-  (cond ((= key -1) (insert " "))
-	      ((= key -2) (insert-button "BKSP" :type 'scr-kb-backspace))
-	      ((= key -3) (insert-button "RTRN" :type 'scr-kb-return))
-	      ((= key -4) (insert-button "SPAC" :type 'scr-kb-space))
-        ((= key -5) (insert-button "SHIF" :type 'scr-kb--shift))
-	      (t (scr-kb-insert-button key))))
+  "Insert KEY into current buffer, with corresponding action."
+  (pcase key
+    ;; ( (insert " "))
+    ('shift (insert-button "" :type 'scr-kb--shift))
+    ('fn (insert-button "" :type 'scr-kb-fn))
+	  ('backspace (scr-kb-insert-button "DEL" "")
+                ;; (insert-button  :type 'scr-kb-backspace)
+                )
+	  ('return (scr-kb-insert-button "RET" "")
+             ;; (insert-button "" :type 'scr-kb-return)
+             )
+	  ('space (scr-kb-insert-button "SPC" "")
+            ;; (insert-button "" :type 'scr-kb-space)
+            )
+	  (_ (scr-kb-insert-button key))))
 
 (defun scr-kb-double-push-button (&optional pos use-mouse-action)
   "Double pushing button."
@@ -153,10 +172,12 @@ Otherwise, insert the button corresponding to KEY."
       (let* ((key-num (length ele))
              (space-times (/ (- width key-num) (1+ key-num)))
              (space (scr-kb--repeat-string " " space-times)))
-        (insert space)
+        ;; (insert space)
         (dolist (key ele)
           (scr-kb-insert-key-button key)
-          (insert space)))
+          (insert " ")
+          ))
+      (backward-delete-char 1)    
       (insert "\n")))
   (backward-delete-char 1))
 
@@ -205,8 +226,14 @@ Otherwise, insert the button corresponding to KEY."
       ;; TODO: Note here when adding DIY things.
       (unless (get-buffer scr-kb-buffer-name)
         (with-current-buffer (get-buffer-create scr-kb-buffer-name)
-          (scr-kb-display scr-kb-keymap-regular)
+          (let* ((origin-height (frame-char-height))
+                 (abs-height (/ (float (* scr-kb-height origin-height))
+                                (length scr-kb-keymap-regular)))
+                 (relative (/ (float abs-height) origin-height)))
+            (scr-kb-display scr-kb-keymap-regular)
+            (text-scale-increase relative))
           (goto-char (point-min))
+          (center-region (point-min) (point-max))
           (setq buffer-read-only t)
           (setq-local cursor-type nil)))
 
@@ -214,7 +241,8 @@ Otherwise, insert the button corresponding to KEY."
 
       (posframe-show scr-kb-buffer-name
                      :position scr-kb-position
-                     :width scr-kb-width)
+                     :width scr-kb-width
+                     )
       ;; (set-frame-parameter (nth 1 (visible-frame-list)) 'background-color "#000000")
       ;; (fit-frame-to-buffer (nth 1 (visible-frame-list))
       ;;                      nil nil nil nil 'vertically)
